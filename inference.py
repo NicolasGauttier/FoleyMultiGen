@@ -69,9 +69,7 @@ def build_models(config):
     time_detector, _ = torch_utils.load_model(time_detector_ckpt, time_detector, device=config.device, strict=True)
 
     # load adapters
-    print('A')
     pipe = build_foleycrafter().to(config.device)
-    print('B')
     ckpt = torch.load(temporal_ckpt_path)
 
     # load temporal adapter
@@ -184,5 +182,4 @@ def run_inference(config, pipe, vocoder, time_detector):
 if __name__ == "__main__":
     config = args_parse()
     pipe, vocoder, time_detector = build_models(config)
-    print('reach inference')
     run_inference(config, pipe, vocoder, time_detector)

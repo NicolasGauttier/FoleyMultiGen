@@ -501,6 +501,80 @@ class IPAttnProcessor2_0(torch.nn.Module):
         return hidden_states
 
 
+class AudioAttnProcessor2_0(torch.nn.Module):
+    def __init__(self, hidden_size, cross_attention_dim=None, scale=1.0, num_audio_tokens=8):
+        super().__init__()
+        if not hasattr(F, "scaled_dot_product_attention"):
+            raise ImportError("AudioAttnProcessor2_0 requires PyTorch 2.0.")
+        self.hidden_size = hidden_size
+        self.cross_attention_dim = cross_attention_dim
+        self.scale = scale
+        self.num_audio_tokens = num_audio_tokens
+
+        self.to_k_audio = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
+        self.to_v_audio = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
+
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None, temb=None):
+        residual = hidden_states
+
+        if attn.spatial_norm is not None:
+            hidden_states = attn.spatial_norm(hidden_states, temb)
+
+        input_ndim = hidden_states.ndim
+        if input_ndim == 4:
+            batch_size, channel, height, width = hidden_states.shape
+            hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+
+        batch_size, sequence_length, _ = hidden_states.shape
+
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+        query = attn.to_q(hidden_states)
+
+        # Split encoder_hidden_states into normal and audio
+        assert encoder_hidden_states is not None, "Expected encoder_hidden_states to include audio tokens"
+        end_pos = encoder_hidden_states.shape[1] - self.num_audio_tokens
+        encoder_text_states = encoder_hidden_states[:, :end_pos, :]
+        encoder_audio_states = encoder_hidden_states[:, end_pos:, :]
+
+        if attn.norm_cross:
+            encoder_text_states = attn.norm_encoder_hidden_states(encoder_text_states)
+
+        # Normal attention
+        key = attn.to_k(encoder_text_states)
+        value = attn.to_v(encoder_text_states)
+
+        query = query.view(batch_size, -1, attn.heads, self.hidden_size // attn.heads).transpose(1, 2)
+        key = key.view(batch_size, -1, attn.heads, self.hidden_size // attn.heads).transpose(1, 2)
+        value = value.view(batch_size, -1, attn.heads, self.hidden_size // attn.heads).transpose(1, 2)
+
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False)
+
+        # Audio attention
+        audio_key = self.to_k_audio(encoder_audio_states).view(batch_size, -1, attn.heads, self.hidden_size // attn.heads).transpose(1, 2)
+        audio_value = self.to_v_audio(encoder_audio_states).view(batch_size, -1, attn.heads, self.hidden_size // attn.heads).transpose(1, 2)
+
+        audio_hidden = F.scaled_dot_product_attention(query, audio_key, audio_value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        hidden_states = hidden_states + self.scale * audio_hidden
+        hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * (self.hidden_size // attn.heads))
+        hidden_states = hidden_states.to(query.dtype)
+
+        # Output projection
+        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)
+
+        if input_ndim == 4:
+            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+
+        if attn.residual_connection:
+            hidden_states = hidden_states + residual
+
+        return hidden_states / attn.rescale_output_factor
+
+
 ## for controlnet
 class CNAttnProcessor:
     r"""

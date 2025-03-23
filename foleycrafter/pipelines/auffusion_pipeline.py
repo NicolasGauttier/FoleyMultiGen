@@ -36,6 +36,8 @@ from transformers import (
     CLIPTokenizer,
     CLIPVisionModelWithProjection,
     PretrainedConfig,
+    Wav2Vec2Model,
+    Wav2Vec2Processor
 )
 
 from diffusers import PNDMScheduler
@@ -1212,6 +1214,8 @@ class AuffusionNoAdapterPipeline(
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPImageProcessor,
         image_encoder: CLIPVisionModelWithProjection = None,
+        audio_encoder: Optional[Wav2Vec2Model] = None,
+        audio_processor: Optional[Wav2Vec2Processor] = None,
         requires_safety_checker: bool = True,
     ):
         super().__init__()
@@ -1289,6 +1293,8 @@ class AuffusionNoAdapterPipeline(
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
+            audio_encoder=audio_encoder,
+            audio_processor=audio_processor,
         )
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
@@ -1525,6 +1531,20 @@ class AuffusionNoAdapterPipeline(
             negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
 
         return prompt_embeds, negative_prompt_embeds
+
+    def prepare_audio_embeds(self, audio_input, device, num_images_per_prompt, do_classifier_free_guidance):
+        if not isinstance(audio_input, torch.Tensor):
+            audio_input = self.audio_processor(audio_input, sampling_rate=16000, return_tensors="pt").input_values
+
+        audio_input = audio_input.to(device)
+        audio_embeds = self.audio_encoder(audio_input).last_hidden_state
+        audio_embeds = audio_embeds.repeat_interleave(num_images_per_prompt, dim=0)
+
+        if do_classifier_free_guidance:
+            negative_audio_embeds = torch.zeros_like(audio_embeds)
+            audio_embeds = torch.cat([negative_audio_embeds, audio_embeds])
+
+        return audio_embeds
 
     def prepare_ip_adapter_image_embeds(
         self, ip_adapter_image, ip_adapter_image_embeds, device, num_images_per_prompt, do_classifier_free_guidance
@@ -2069,6 +2089,18 @@ class AuffusionNoAdapterPipeline(
 
         # 6.1 Add image embeds for IP-Adapter
         added_cond_kwargs = {"image_embeds": image_embeds} if ip_adapter_image is not None else None
+
+
+        # 6.15 Add audio embeds for IP-Adapter
+        if audio_input is not None:
+            audio_embeds = self.prepare_audio_embeds(
+                audio_input,
+                device,
+                batch_size * num_images_per_prompt,
+                self.do_classifier_free_guidance,
+            )
+            added_cond_kwargs["audio_embeds"] = audio_embeds
+
 
         # 6.2 Optionally get Guidance Scale Embedding
         timestep_cond = None

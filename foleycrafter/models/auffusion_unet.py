@@ -877,7 +877,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
-        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
         class_labels: Optional[torch.Tensor] = None,
         timestep_cond: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -1115,6 +1115,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 image_embeds = image_embeds.to(encoder_hidden_states.dtype)
             encoder_hidden_states = (encoder_hidden_states, image_embeds)
             # encoder_hidden_states = torch.cat([encoder_hidden_states, image_embeds], dim=1)
+
+        elif isinstance(encoder_hidden_states, tuple) and len(encoder_hidden_states) == 3:
+            # Assuming format: (text_states, video_states, audio_states)
+            text_states, video_states, audio_states = encoder_hidden_states
+            encoder_hidden_states = text_states + video_states + audio_states
+
         # import ipdb; ipdb.set_trace()
         # 2. pre-process
         sample = self.conv_in(sample)
