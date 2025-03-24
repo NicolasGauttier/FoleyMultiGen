@@ -35,6 +35,7 @@ def args_parse():
     config.add_argument("--input", type=str, default="examples/sora", help="input video folder path")
     config.add_argument("--ckpt", type=str, default="checkpoints/", help="checkpoints folder path")
     config.add_argument("--save_dir", type=str, default="output/", help="generation result save path")
+    config.add_argument("--audio_prompt_path", type=str,default="", help="path to audio_prompt")
     config.add_argument(
         "--pretrain",
         type=str,
