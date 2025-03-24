@@ -17,7 +17,7 @@ def get_text_prompt_from_wav(path_to_wav):
     prompt = "The following is a detailed description of the audio:\n"
     prompt += f"Describe the sound corresponding to this audio embedding: {embedding.tolist()}\n"
     prompt += "The sound is: "
-    captioner = pipeline("text-generation", model="distilgpt2", device=-1)
+    captioner = pipeline("text-generation", model="gpt2", device=-1)
     response = captioner(prompt)
     print(response[0]["generated_text"])
     # Truncate the prompt to the maximum length supported by the model
