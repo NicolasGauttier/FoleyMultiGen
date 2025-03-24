@@ -10,6 +10,7 @@ import torchvision
 from huggingface_hub import snapshot_download
 from moviepy.editor import AudioFileClip, VideoFileClip
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
+from run_wav2clip import get_text_prompt_from_wav
 
 from foleycrafter.models.onset import torch_utils
 from foleycrafter.models.time_detector.model import VideoOnsetNet
@@ -96,6 +97,9 @@ def build_models(config):
 
 
 def run_inference(config, pipe, vocoder, time_detector):
+    if len(config.audio_prompt_path) > 1:
+        audio_description = get_text_prompt_from_wav(config.audio_prompt_path)
+        config.prompt += "," + audio_description
     controlnet_conditioning_scale = config.temporal_scale
     os.makedirs(config.save_dir, exist_ok=True)
 
